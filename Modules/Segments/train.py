@@ -9,6 +9,7 @@ from transformers import (
     SegformerImageProcessor,
     TrainingArguments,
     Trainer,
+    EarlyStoppingCallback,
 )
 import evaluate
 
@@ -144,22 +145,33 @@ def compute_metrics(eval_pred):
 # --- 8. TRAINING ARGUMENTS ---
 training_args = TrainingArguments(
     output_dir=OUTPUT_CHECKPOINT_DIR, # Dùng đường dẫn từ config
-    learning_rate=6e-5,
-    num_train_epochs=100,
+    
+    learning_rate=6e-5,          
+    num_train_epochs=100,        
+    lr_scheduler_type="cosine",  # <--- Thay đổi: Giảm LR theo hình sin (tốt hơn linear mặc định)
+    warmup_ratio=0.1,            # <--- 10% thời gian đầu để "làm nóng" model, tránh shock
+    
+    # Regularization
+    weight_decay=0.01,
 
     dataloader_num_workers=0, # Chống treo máy 
     
     per_device_train_batch_size=4,
     gradient_accumulation_steps=4, 
-    
     per_device_eval_batch_size=4,
-    save_total_limit=2,
+    
+    save_total_limit=2,  # Chỉ giữ lại 2 checkpoint gần nhất
     eval_strategy="epoch",
     save_strategy="epoch",
     logging_steps=1,
     remove_unused_columns=False,
     push_to_hub=False,
-    fp16=torch.cuda.is_available(), # Tự động bật FP16 nếu có GPU
+    
+    load_best_model_at_end=True,    # Train xong tự động load lại model ngon nhất
+    metric_for_best_model="mean_iou", # Tiêu chí: Cái nào có Mean IoU cao nhất là NHẤT
+    greater_is_better=True,
+    
+    fp16=False,  # Dùng FP16 nếu có GPU
 )
 
 # --- 9. BẮT ĐẦU TRAIN ---
@@ -169,6 +181,7 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=val_dataset,
     compute_metrics=compute_metrics,
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=20)],
 )
 
 print("\n🚀 Bắt đầu training...")
