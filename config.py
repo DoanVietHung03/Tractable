@@ -9,8 +9,7 @@ PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 DATASET_DIR = os.path.join(PROJECT_ROOT, "Dataset")
 
 # Đường dẫn cụ thể đến từng bộ dữ liệu
-ETRIMS_DIR = os.path.join(DATASET_DIR, "etrims")
-CMP_DIR = os.path.join(DATASET_DIR, "others" , "1-CMP")
+ETRIMS_DIR = os.path.join(DATASET_DIR, "others", "1-ETRIMs")
 IRFS_DIR = os.path.join(DATASET_DIR, "others", "0-IRFs")
 
 # Đường dẫn output (nếu cần)

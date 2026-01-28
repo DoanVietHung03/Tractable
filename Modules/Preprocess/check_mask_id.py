@@ -29,7 +29,3 @@ if __name__ == "__main__":
     # check ETRIMS
     etrims_mask_path = os.path.join(config.ETRIMS_DIR, "masks")
     check_unique_ids(etrims_mask_path, "ETRIMS")
-    
-    # check CMP
-    cmp_mask_path = os.path.join(config.CMP_DIR, "1-1-masks")
-    check_unique_ids(cmp_mask_path, "CMP")

@@ -15,13 +15,6 @@ import config
 
 DATASET_CONFIGS = [
     {
-        "name": "cmp",
-        # Dựa trên logic check_mask_id: config.CMP_DIR trỏ tới folder chứa 1-1-masks
-        # Nên ta suy ra folder ảnh là 1-0-Image nằm cùng cấp
-        "img_dir": os.path.join(config.CMP_DIR, "1-0-Image"),
-        "mask_dir": os.path.join(config.CMP_DIR, "1-1-masks")
-    },
-    {
         "name": "etrims",
         "img_dir": os.path.join(config.ETRIMS_DIR, "images"),
         "mask_dir": os.path.join(config.ETRIMS_DIR, "masks")

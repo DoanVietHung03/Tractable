@@ -51,7 +51,8 @@ id2label = {
 label2id = {v: k for k, v in id2label.items()}
 NUM_CLASSES = len(id2label)
 
-MODEL_CHECKPOINT = "nvidia/mit-b1" 
+# Model Segformer B1
+MODEL_CHECKPOINT = "nvidia/mit-b1"
 
 # --- 4. DATASET CLASS ---
 class SemanticSegmentationDataset(Dataset):
@@ -171,7 +172,7 @@ training_args = TrainingArguments(
     metric_for_best_model="mean_iou", # Tiêu chí: Cái nào có Mean IoU cao nhất là NHẤT
     greater_is_better=True,
     
-    fp16=False,  # Dùng FP16 nếu có GPU
+    fp16=torch.cuda.is_available(),  # Dùng FP16 nếu có GPU
 )
 
 # --- 9. BẮT ĐẦU TRAIN ---
@@ -181,13 +182,13 @@ trainer = Trainer(
     train_dataset=train_dataset,
     eval_dataset=val_dataset,
     compute_metrics=compute_metrics,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=20)],
+    callbacks=[EarlyStoppingCallback(early_stopping_patience=10)],
 )
 
-print("\n🚀 Bắt đầu training tiếp từ checkpoint 224...")
+print("\n🚀 Bắt đầu training...")
 
-checkpoint_path = os.path.join(OUTPUT_CHECKPOINT_DIR, "checkpoint-224")
-trainer.train(resume_from_checkpoint=checkpoint_path)
+# checkpoint_path = os.path.join(OUTPUT_CHECKPOINT_DIR, "checkpoint-224")
+trainer.train()
 
 # Lưu model cuối cùng vào đường dẫn config
 trainer.save_model(FINAL_MODEL_DIR)

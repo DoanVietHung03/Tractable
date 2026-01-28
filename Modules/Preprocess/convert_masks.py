@@ -100,4 +100,4 @@ if __name__ == "__main__":
         count += 1
         print(f"Converted OK: {fname}")
 
-    print(f"\n✅ Đã convert xong {count} ảnh mask ETRIMS.")
+    print(f"\n✅ Đã convert xong {count} ảnh mask.")
