@@ -12,3 +12,5 @@ Samples/
 Architecture/
 Dataset/
 Final_Dataset/
+segformer_house_output/
+segformer_house_final/

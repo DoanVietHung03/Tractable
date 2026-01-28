@@ -1,4 +1,11 @@
 import os
+import sys
+
+current_dir = os.path.dirname(os.path.abspath(__file__))
+root_dir = os.path.dirname(os.path.dirname(current_dir))
+sys.path.append(root_dir)
+
+import config
 import torch
 import numpy as np
 import matplotlib.pyplot as plt
@@ -7,9 +14,13 @@ from PIL import Image
 from transformers import SegformerForSemanticSegmentation, SegformerImageProcessor
 
 # --- 1. CẤU HÌNH ---
-MODEL_PATH = "segformer_house_final"  # Folder chứa model đã train
-TEST_DIR = "/kaggle/working/Final_Dataset/test/images" # Folder ảnh test
-NUM_SAMPLES = 4 # Số lượng ảnh muốn test thử
+# Đường dẫn đến Model đã train xong (Nằm ở root/segformer_house_final)
+MODEL_PATH = os.path.join(config.PROJECT_ROOT, "segformer_house_final")
+
+# Đường dẫn đến ảnh Test (Nằm ở root/Final_Dataset/test/images)
+TEST_DIR = os.path.join(config.PROJECT_ROOT, "Final_Dataset", "test", "images")
+
+NUM_SAMPLES = 10 # Số lượng ảnh muốn test thử
 
 # Map ID sang Tên (Phải khớp với lúc train)
 id2label = {
@@ -29,9 +40,9 @@ palette = [
     [0, 0, 0],       # 0: background
     [128, 0, 0],     # 1: building
     [0, 0, 128],     # 2: window
-    [128, 64, 0],    # 3: door
+    [128, 128, 0],    # 3: door
     [0, 128, 0],     # 4: tree
-    [0, 191, 255],   # 5: sky
+    [0, 128, 128],   # 5: sky
     [128, 128, 128], # 6: road
     [128, 0, 128]    # 7: car
 ]
@@ -57,72 +68,81 @@ def show_predictions(model, processor, image_paths):
     model.to(device)
     model.eval()
     
-    # Tạo plot
-    fig, axs = plt.subplots(len(image_paths), 2, figsize=(15, 6 * len(image_paths)))
-    if len(image_paths) == 1: axs = [axs] # Fix lỗi dimension nếu chỉ có 1 ảnh
-    
     for i, img_path in enumerate(image_paths):
-        # 1. Load ảnh
+        # --- XỬ LÝ ẢNH ---
         image = Image.open(img_path).convert("RGB")
-        
-        # 2. Preprocess
         inputs = processor(images=image, return_tensors="pt").to(device)
         
-        # 3. Dự đoán
         with torch.no_grad():
             outputs = model(**inputs)
             
-        # 4. Post-process (Upsample logits về kích thước ảnh gốc)
         logits = outputs.logits
         upsampled_logits = torch.nn.functional.interpolate(
             logits,
-            size=image.size[::-1], # (height, width) - Lưu ý PIL size là (W, H)
+            size=image.size[::-1],
             mode="bilinear",
             align_corners=False,
         )
-        
-        # Lấy class có xác suất cao nhất
         pred_seg = upsampled_logits.argmax(dim=1)[0].cpu().numpy()
-        
-        # 5. Tô màu
         color_pred = colorize_mask(pred_seg, palette)
         
-        # 6. Hiển thị
-        ax_curr = axs[i] if len(image_paths) > 1 else axs
+        # --- VẼ HÌNH (Tạo figure riêng cho mỗi ảnh) ---
+        fig, axs = plt.subplots(1, 2, figsize=(14, 6)) # Kích thước lớn, dễ nhìn
         
         # Ảnh gốc
-        ax_curr[0].imshow(image)
-        ax_curr[0].set_title(f"Ảnh Gốc: {os.path.basename(img_path)}")
-        ax_curr[0].axis('off')
+        axs[0].imshow(image)
+        axs[0].set_title(f"[{i+1}/{len(image_paths)}] Ảnh Gốc: {os.path.basename(img_path)}", fontsize=14)
+        axs[0].axis('off')
         
-        # Ảnh dự đoán
-        ax_curr[1].imshow(color_pred)
-        ax_curr[1].set_title("Kết quả Segmentation")
-        ax_curr[1].axis('off')
+        # Kết quả
+        axs[1].imshow(color_pred)
+        axs[1].set_title("Kết quả Segmentation", fontsize=14)
+        axs[1].axis('off')
         
-    # Tạo chú thích (Legend)
-    patches = [mpatches.Patch(color=np.array(palette[i])/255, label=label) 
-               for i, label in id2label.items()]
-    fig.legend(handles=patches, loc='upper center', bbox_to_anchor=(0.5, 1.02), ncol=4, fontsize=12)
-    plt.tight_layout()
-    plt.show()
+        # Chú thích
+        patches = [mpatches.Patch(color=np.array(palette[k])/255, label=label) 
+                   for k, label in id2label.items()]
+        # Đặt chú thích bên phải cho gọn
+        fig.legend(handles=patches, loc='center right', title="Chú giải Class")
+        
+        plt.tight_layout()
+        plt.subplots_adjust(right=0.85) # Chừa chỗ cho cái Legend bên phải
+        
+        print(f"🖼️ Đang hiển thị ảnh {i+1}/{len(image_paths)}: {os.path.basename(img_path)}")
+        plt.show()
 
 # --- 3. CHẠY THỰC TẾ ---
 if __name__ == "__main__":
-    print(f"Đang load model từ: {MODEL_PATH} ...")
+    print(f"Project Root: {config.PROJECT_ROOT}")
+    print(f"Model Path:   {MODEL_PATH}")
+    print(f"Test Img Dir: {TEST_DIR}")
+    
+    if not os.path.exists(MODEL_PATH):
+        print("\n❌ LỖI: Không tìm thấy folder model!")
+        print("👉 Bạn đã chạy xong 'train.py' chưa?")
+        exit()
+
+    if not os.path.exists(TEST_DIR):
+        print("\n❌ LỖI: Không tìm thấy folder ảnh test!")
+        print("👉 Bạn đã chạy 'split_data.py' để tạo dataset chưa?")
+        exit()
+        
     try:
         model = SegformerForSemanticSegmentation.from_pretrained(MODEL_PATH)
         processor = SegformerImageProcessor.from_pretrained(MODEL_PATH)
+        print("\n✅ Đã load model thành công!")
         
         # Lấy ngẫu nhiên file ảnh
         all_images = [os.path.join(TEST_DIR, f) for f in os.listdir(TEST_DIR) if f.endswith(('.jpg', '.png'))]
         if not all_images:
             print("Không tìm thấy ảnh nào trong thư mục test!")
         else:
-            sample_images = np.random.choice(all_images, min(len(all_images), NUM_SAMPLES), replace=False)
-            print("Đang dự đoán...")
+            sample_count = min(len(all_images), NUM_SAMPLES)
+            sample_images = np.random.choice(all_images, sample_count, replace=False)
+            
+            print(f"📸 Đang dự đoán trên {sample_count} ảnh ngẫu nhiên...")
             show_predictions(model, processor, sample_images)
+            print("Xong!")
             
     except Exception as e:
         print(f"Lỗi: {e}")
-        print("Gợi ý: Hãy chắc chắn bạn đã chạy xong phần Train và folder 'segformer_house_final' đã tồn tại.")

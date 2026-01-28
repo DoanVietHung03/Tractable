@@ -184,8 +184,10 @@ trainer = Trainer(
     callbacks=[EarlyStoppingCallback(early_stopping_patience=20)],
 )
 
-print("\n🚀 Bắt đầu training...")
-trainer.train()
+print("\n🚀 Bắt đầu training tiếp từ checkpoint 224...")
+
+checkpoint_path = os.path.join(OUTPUT_CHECKPOINT_DIR, "checkpoint-224")
+trainer.train(resume_from_checkpoint=checkpoint_path)
 
 # Lưu model cuối cùng vào đường dẫn config
 trainer.save_model(FINAL_MODEL_DIR)
