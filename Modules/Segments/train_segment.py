@@ -4,7 +4,7 @@ import numpy as np
 import torch
 import random
 from torch.utils.data import Dataset
-from PIL import Image
+from PIL import Image, ImageEnhance
 from transformers import (
     SegformerForSemanticSegmentation,
     SegformerImageProcessor,
@@ -14,57 +14,38 @@ from transformers import (
 )
 import evaluate
 
-# --- 1. SETUP ĐỂ IMPORT CONFIG ---
-# Lấy đường dẫn file hiện tại, đi lùi ra 2 cấp (Modules/Segments -> Root)
+# --- 1. SETUP CONFIG ---
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(root_dir)
 
 import config
 
-# --- 2. CẤU HÌNH ĐƯỜNG DẪN TỰ ĐỘNG ---
-# Folder dữ liệu đã được tạo bởi split_data.py
+# --- 2. PATHS ---
 FINAL_DATASET_DIR = os.path.join(config.PROJECT_ROOT, "Final_Dataset")
 TRAIN_DIR = os.path.join(FINAL_DATASET_DIR, "train")
 VAL_DIR = os.path.join(FINAL_DATASET_DIR, "val")
-
-# Folder output (Lưu checkpoint và model final ngay tại thư mục gốc dự án)
 OUTPUT_CHECKPOINT_DIR = os.path.join(config.PROJECT_ROOT, "segformer_house_output")
 FINAL_MODEL_DIR = os.path.join(config.PROJECT_ROOT, "segformer_house_final")
 
-# Kiểm tra an toàn trước khi chạy
-if not os.path.exists(TRAIN_DIR):
-    print("❌ LỖI: Không tìm thấy thư mục Train!")
-    print("👉 Bạn đã chạy file 'Modules/Preprocess/split_data.py' chưa?")
-    exit()
-
-# --- 3. CẤU HÌNH CLASS ---
+# --- 3. CLASS CONFIG (Để ngoài để các file khác import được) ---
 id2label = {
-    0: "background",
-    1: "building",
-    2: "window",
-    3: "door",
-    4: "tree",
-    5: "sky",
-    6: "road",
-    7: "car"
+    0: "background", 1: "building", 2: "window", 3: "door",
+    4: "tree", 5: "sky", 6: "road", 7: "car"
 }
 label2id = {v: k for k, v in id2label.items()}
 NUM_CLASSES = len(id2label)
-
-# Model Segformer B1
 MODEL_CHECKPOINT = "nvidia/mit-b1"
 
-# --- 4. DATASET CLASS ---
+# --- 4. DATASET CLASS (Để ngoài để các file khác import được) ---
 class SemanticSegmentationDataset(Dataset):
     def __init__(self, root_dir, processor, augment=False):
         self.root_dir = root_dir
         self.processor = processor
-        self.augment = augment
+        self.augment = augment 
         self.images_dir = os.path.join(root_dir, "images")
         self.masks_dir = os.path.join(root_dir, "masks")
         
-        # Lấy danh sách ảnh, bỏ qua file ẩn
         self.images = sorted([f for f in os.listdir(self.images_dir) if not f.startswith('.')])
         self.masks_map = {f: f for f in os.listdir(self.masks_dir)}
 
@@ -76,25 +57,19 @@ class SemanticSegmentationDataset(Dataset):
         image_path = os.path.join(self.images_dir, img_name)
         image = Image.open(image_path).convert("RGB")
         
-        # Logic tìm mask thông minh
         mask_name = img_name 
         if mask_name not in self.masks_map:
             mask_stem = os.path.splitext(img_name)[0]
             mask_name = mask_stem + ".png"
-            
         segmentation_map = Image.open(os.path.join(self.masks_dir, mask_name))
-        
+
         if self.augment:
-            # 1. Random Horizontal Flip (Lật ngang 50%)
             if random.random() > 0.5:
                 image = image.transpose(Image.FLIP_LEFT_RIGHT)
                 segmentation_map = segmentation_map.transpose(Image.FLIP_LEFT_RIGHT)
             
-            # 2. Color Jitter (Thay đổi độ sáng/tương phản nhẹ - Chỉ ảnh, không sửa mask)
-            # Chỉnh độ sáng (0.8 - 1.2)
             enhancer = ImageEnhance.Brightness(image)
             image = enhancer.enhance(random.uniform(0.8, 1.2))
-            # Chỉnh tương phản (0.8 - 1.2)
             enhancer = ImageEnhance.Contrast(image)
             image = enhancer.enhance(random.uniform(0.8, 1.2))
 
@@ -103,116 +78,104 @@ class SemanticSegmentationDataset(Dataset):
             segmentation_maps=segmentation_map, 
             return_tensors="pt"
         )
-        
         inputs = {k: v.squeeze() for k, v in inputs.items()}
         return inputs
 
-# --- 5. CHUẨN BỊ DỮ LIỆU ---
-processor = SegformerImageProcessor.from_pretrained(
-    MODEL_CHECKPOINT, 
-    do_reduce_labels=False
-)
-
-train_dataset = SemanticSegmentationDataset(TRAIN_DIR, processor, augment=True)
-val_dataset = SemanticSegmentationDataset(VAL_DIR, processor, augment=False)
-
-# Kiểm tra nhanh
-print(f"Train size: {len(train_dataset)}, Val size: {len(val_dataset)}")
-
-# --- 6. KHỞI TẠO MODEL ---
-model = SegformerForSemanticSegmentation.from_pretrained(
-    MODEL_CHECKPOINT,
-    id2label=id2label,
-    label2id=label2id,
-    ignore_mismatched_sizes=True,
-)
-
-# --- 7. METRIC (IoU) ---
+# --- 5. HÀM METRIC ---
 metric = evaluate.load("mean_iou")
 
 def compute_metrics(eval_pred):
     logits, labels = eval_pred
-    
     logits_tensor = torch.from_numpy(logits)
     logits_tensor = torch.nn.functional.interpolate(
-        logits_tensor,
-        size=labels.shape[-2:],
-        mode="bilinear",
-        align_corners=False,
+        logits_tensor, size=labels.shape[-2:], mode="bilinear", align_corners=False,
     ).argmax(dim=1)
     
     pred_labels = logits_tensor.detach().cpu().numpy()
-    
     metrics = metric.compute(
-        predictions=pred_labels, 
-        references=labels, 
-        num_labels=NUM_CLASSES, 
-        ignore_index=255,
-        reduce_labels=False
+        predictions=pred_labels, references=labels, 
+        num_labels=NUM_CLASSES, ignore_index=255, reduce_labels=False
     )
     
-    # Trả về chi tiết từng class để dễ theo dõi
     per_category_iou = metrics.pop("per_category_iou")
+    # Xử lý NaN thành 0.0 để tránh lỗi
+    per_category_iou = [0.0 if np.isnan(x) else x for x in per_category_iou]
+    
     results = {
         "mean_iou": metrics["mean_iou"],
         "accuracy": metrics["overall_accuracy"],
     }
-    # Log thêm IoU của vài class quan trọng
-    if len(per_category_iou) > 4: # Đảm bảo đủ class
+    if len(per_category_iou) > 4: 
         results["iou_building"] = per_category_iou[1]
         results["iou_window"] = per_category_iou[2]
         results["iou_tree"] = per_category_iou[4]
         
     return results
 
-# --- 8. TRAINING ARGUMENTS ---
-training_args = TrainingArguments(
-    output_dir=OUTPUT_CHECKPOINT_DIR, # Dùng đường dẫn từ config
-    
-    learning_rate=6e-5,          
-    num_train_epochs=50,        
-    lr_scheduler_type="cosine",  # <--- Thay đổi: Giảm LR theo hình sin (tốt hơn linear mặc định)
-    warmup_ratio=0.1,            # <--- 10% thời gian đầu để "làm nóng" model, tránh shock
-    
-    # Regularization
-    weight_decay=0.01,
+# ==============================================================================
+# PHẦN CHÍNH: CHỈ CHẠY KHI BẠN GÕ LỆNH "python train_segment.py"
+# ==============================================================================
+if __name__ == "__main__":
+    if not os.path.exists(TRAIN_DIR):
+        print("❌ LỖI: Không tìm thấy thư mục Train!")
+        exit()
 
-    dataloader_num_workers=0, # Chống treo máy 
+    print("⏳ Đang chuẩn bị dữ liệu và model...")
     
-    per_device_train_batch_size=4,
-    gradient_accumulation_steps=4, 
-    per_device_eval_batch_size=4,
-    
-    save_total_limit=2,  # Chỉ giữ lại 2 checkpoint gần nhất
-    eval_strategy="epoch",
-    save_strategy="epoch",
-    logging_steps=10,
-    remove_unused_columns=False,
-    push_to_hub=False,
-    
-    load_best_model_at_end=True,    # Train xong tự động load lại model ngon nhất
-    metric_for_best_model="mean_iou", # Tiêu chí: Cái nào có Mean IoU cao nhất là NHẤT
-    greater_is_better=True,
-    
-    fp16=False,  # Dùng FP16 nếu có GPU
-)
+    # 1. Prepare Data
+    processor = SegformerImageProcessor.from_pretrained(MODEL_CHECKPOINT, do_reduce_labels=False)
+    train_dataset = SemanticSegmentationDataset(TRAIN_DIR, processor, augment=True)
+    val_dataset = SemanticSegmentationDataset(VAL_DIR, processor, augment=False)
 
-# --- 9. BẮT ĐẦU TRAIN ---
-trainer = Trainer(
-    model=model,
-    args=training_args,
-    train_dataset=train_dataset,
-    eval_dataset=val_dataset,
-    compute_metrics=compute_metrics,
-    callbacks=[EarlyStoppingCallback(early_stopping_patience=10)],
-)
+    print(f"Train size: {len(train_dataset)}, Val size: {len(val_dataset)}")
 
-print("\n🚀 Bắt đầu training...")
+    # 2. Model
+    model = SegformerForSemanticSegmentation.from_pretrained(
+        MODEL_CHECKPOINT,
+        id2label=id2label,
+        label2id=label2id,
+        ignore_mismatched_sizes=True,
+    )
 
-# checkpoint_path = os.path.join(OUTPUT_CHECKPOINT_DIR, "checkpoint-224")
-trainer.train()
+    # 3. Training Args (Cấu hình cho RTX 3060)
+    training_args = TrainingArguments(
+        output_dir=OUTPUT_CHECKPOINT_DIR,
+        learning_rate=6e-5,
+        num_train_epochs=50,
+        lr_scheduler_type="cosine",
+        warmup_ratio=0.1,
+        weight_decay=0.01,
+        
+        dataloader_num_workers=8, # Tận dụng 8 core CPU
+        per_device_train_batch_size=16, # Batch size lớn cho RTX 3060
+        gradient_accumulation_steps=1,
+        per_device_eval_batch_size=16,
+        
+        save_strategy="epoch",
+        eval_strategy="epoch",
+        save_total_limit=2,
+        logging_steps=10,
+        
+        load_best_model_at_end=True,
+        metric_for_best_model="mean_iou",
+        greater_is_better=True,
+        
+        fp16=True, # Bật tăng tốc FP16
+    )
 
-# Lưu model cuối cùng vào đường dẫn config
-trainer.save_model(FINAL_MODEL_DIR)
-processor.save_pretrained(FINAL_MODEL_DIR)
-print(f"✅ Training hoàn tất. Model đã lưu tại: {FINAL_MODEL_DIR}")
+    # 4. Trainer
+    trainer = Trainer(
+        model=model,
+        args=training_args,
+        train_dataset=train_dataset,
+        eval_dataset=val_dataset,
+        compute_metrics=compute_metrics,
+        callbacks=[EarlyStoppingCallback(early_stopping_patience=10)],
+    )
+
+    print("\n🚀 Bắt đầu training...")
+    trainer.train()
+
+    trainer.save_model(FINAL_MODEL_DIR)
+    processor.save_pretrained(FINAL_MODEL_DIR)
+    print(f"✅ Training hoàn tất. Model lưu tại: {FINAL_MODEL_DIR}")

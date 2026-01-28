@@ -15,11 +15,6 @@ import config
 
 DATASET_CONFIGS = [
     {
-        "name": "etrims",
-        "img_dir": os.path.join(config.ETRIMS_DIR, "images"),
-        "mask_dir": os.path.join(config.ETRIMS_DIR, "masks")
-    },
-    {
         "name": "irfs",
         "img_dir": os.path.join(config.IRFS_DIR, "0-0-Image"),
         "mask_dir": os.path.join(config.IRFS_DIR, "0-1-masks")

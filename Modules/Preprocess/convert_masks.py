@@ -2,9 +2,9 @@ import numpy as np
 import os
 import sys
 from PIL import Image
+from tqdm import tqdm
 
 # --- 1. SETUP ĐỂ IMPORT CONFIG ---
-# Lấy đường dẫn file hiện tại, đi lùi ra 2 cấp (Modules/Preprocess -> Root)
 current_dir = os.path.dirname(os.path.abspath(__file__))
 root_dir = os.path.dirname(os.path.dirname(current_dir))
 sys.path.append(root_dir)
@@ -21,145 +21,114 @@ import config
 # 6: road
 # 7: car
 
-def convert_etrims_mask(mask_path):
+def convert_irfs_mask(mask_path):
     """
-    ETRIMS: Ảnh index 8 bit.
-    Mapping dựa trên kết quả debug:
-    1->Build, 2->Car, 3->Door, 4->Road, 5->Road, 6->Sky, 7->Tree, 8->Window
+    Mapping chuẩn xác dựa trên ảnh check_mask_id (IRFS.jpg):
+    - ID 0: Building (Tường, bê tông) -> Map về 1
+    - ID 1: Sky (Bầu trời) -> Map về 5
+    - ID 2: Window (Kính) -> Map về 2
+    - ID 4: Door (Lối vào) -> Map về 3
+    - ID 5: Tree (Cây) -> Map về 4
     """
     try:
-        # Load ảnh chế độ 'L' (Grayscale/Index) để lấy đúng giá trị ID pixel
         mask = Image.open(mask_path).convert('L')
         mask_np = np.array(mask)
     except Exception as e:
-        print(f"⚠️ Lỗi đọc file {os.path.basename(mask_path)}: {e}")
-        return None
-
-    h, w = mask_np.shape
-    new_mask = np.zeros((h, w), dtype=np.uint8) # Mặc định là 0 (Background)
-
-    # --- MAPPING ETRIMS -> FINAL ---
-    new_mask[mask_np == 1] = 1 # Building -> Building
-    new_mask[mask_np == 2] = 7 # Car -> Car
-    new_mask[mask_np == 3] = 3 # Door -> Door
-    new_mask[mask_np == 4] = 6 # Pavement -> Road
-    new_mask[mask_np == 5] = 6 # Road -> Road
-    new_mask[mask_np == 6] = 5 # Sky -> Sky
-    new_mask[mask_np == 7] = 4 # Vegetation -> Tree
-    new_mask[mask_np == 8] = 2 # Window -> Window
-    
-    return new_mask
-
-def convert_irfs_mask(mask_path):
-    """
-    IRFS: Ảnh index.
-    Lưu ý quan trọng: ID 0 của IRFS là Sky (Trời), khác với chuẩn chung!
-    """
-    try:
-        mask = Image.open(mask_path).convert('L')
-        mask_np = np.array(mask)
-    except:
+        print(f"Lỗi đọc file {mask_path}: {e}")
         return None
 
     h, w = mask_np.shape
     new_mask = np.zeros((h, w), dtype=np.uint8)
 
     # --- MAPPING IRFS -> FINAL ---
-    new_mask[mask_np == 0] = 5 # Sky -> Sky (Đã sửa lỗi quan trọng này)
-    new_mask[mask_np == 1] = 1 # Building -> Building
-    new_mask[mask_np == 2] = 2 # Window -> Window
-    new_mask[mask_np == 3] = 1 # Các chi tiết phụ -> Building
-    new_mask[mask_np == 4] = 3 # Door -> Door
-    new_mask[mask_np == 5] = 4 # Tree -> Tree
-
+    new_mask[mask_np == 0] = 1  # ID 0 là Tường -> Building
+    new_mask[mask_np == 1] = 5  # ID 1 là Trời -> Sky
+    new_mask[mask_np == 2] = 2  # ID 2 là Kính -> Window
+    new_mask[mask_np == 4] = 3  # ID 4 là Cửa -> Door
+    new_mask[mask_np == 5] = 4  # ID 5 là Cây -> Tree
+    
+    # Các ID lạ khác (nếu có) sẽ mặc định là 0 (Background)
+    
     return new_mask
 
-def convert_cmp_mask(mask_path):
-    """
-    CMP: Thường là ảnh index hoặc RGB chuẩn.
-    Ta dùng mapping chuẩn của CMP Facade Database.
-    """
+def convert_etrims_mask(mask_path):
+    """ETRIMS Mapping (Giữ nguyên vì đã chuẩn)"""
     try:
         mask = Image.open(mask_path).convert('L')
         mask_np = np.array(mask)
-    except:
-        return None
+    except: return None
+
+    h, w = mask_np.shape
+    new_mask = np.zeros((h, w), dtype=np.uint8)
+
+    new_mask[mask_np == 1] = 1 # Building
+    new_mask[mask_np == 2] = 7 # Car
+    new_mask[mask_np == 3] = 3 # Door
+    new_mask[mask_np == 4] = 6 # Pavement -> Road
+    new_mask[mask_np == 5] = 6 # Road -> Road
+    new_mask[mask_np == 6] = 5 # Sky
+    new_mask[mask_np == 7] = 4 # Vegetation -> Tree
+    new_mask[mask_np == 8] = 2 # Window
+    
+    return new_mask
+
+def convert_cmp_mask(mask_path):
+    """CMP Mapping (Giữ nguyên)"""
+    try:
+        mask = Image.open(mask_path).convert('L')
+        mask_np = np.array(mask)
+    except: return None
         
     h, w = mask_np.shape
     new_mask = np.zeros((h, w), dtype=np.uint8)
     
-    # --- MAPPING CMP -> FINAL ---
-    # 1-4: Các loại tường/cột -> Building
-    new_mask[mask_np == 1] = 1 
+    new_mask[mask_np == 1] = 1 # Wall -> Building
     new_mask[mask_np == 2] = 1
     new_mask[mask_np == 3] = 1
     new_mask[mask_np == 4] = 1
-    
-    # 5, 7, 8: Các loại cửa sổ/rèm -> Window
-    new_mask[mask_np == 5] = 2
-    new_mask[mask_np == 7] = 2
-    new_mask[mask_np == 8] = 2
-    
-    # 6, 10: Cửa đi, Cửa hàng -> Door
-    new_mask[mask_np == 6] = 3
-    new_mask[mask_np == 10] = 3
-    
-    # 9, 11: Ban công, trang trí -> Building
-    new_mask[mask_np == 9] = 1
-    new_mask[mask_np == 11] = 1
-    
-    # 12: Sky -> Sky
-    new_mask[mask_np == 12] = 5
+    new_mask[mask_np == 5] = 2 # Window
+    new_mask[mask_np == 6] = 3 # Door
+    new_mask[mask_np == 7] = 2 
+    new_mask[mask_np == 8] = 2 
+    new_mask[mask_np == 9] = 1 
+    new_mask[mask_np == 10] = 3 
+    new_mask[mask_np == 12] = 5 # Sky
     
     return new_mask
 
-def process_dataset(dataset_name, input_folder, output_folder, convert_func):
-    print(f"\n🚀 Đang xử lý bộ: {dataset_name}...")
-    print(f"   Input:  {input_folder}")
-    print(f"   Output: {output_folder}")
-
-    if not os.path.exists(input_folder):
-        print(f"❌ LỖI: Không tìm thấy thư mục input: {input_folder}")
+def process_dataset(name, input_dir, output_dir, func):
+    print(f"\n🚀 Đang xử lý: {name}...")
+    if not os.path.exists(input_dir):
+        print(f"❌ Không tìm thấy: {input_dir}")
         return
 
-    os.makedirs(output_folder, exist_ok=True)
-    files = [f for f in os.listdir(input_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    os.makedirs(output_dir, exist_ok=True)
+    files = [f for f in os.listdir(input_dir) if f.endswith(('.png', '.jpg', '.jpeg'))]
     
     count = 0
-    for f in files:
-        in_path = os.path.join(input_folder, f)
+    for f in tqdm(files, desc=f"Converting {name}"):
+        in_path = os.path.join(input_dir, f)
         
-        # Thực hiện convert
-        new_mask = convert_func(in_path)
+        # Convert
+        new_mask = func(in_path)
         
         if new_mask is not None:
-            # Lưu file kết quả dưới dạng PNG (quan trọng để giữ đúng giá trị pixel)
-            # Giữ nguyên tên file gốc, chỉ đảm bảo đuôi là .png
             out_name = os.path.splitext(f)[0] + ".png"
-            out_path = os.path.join(output_folder, out_name)
-            
+            out_path = os.path.join(output_dir, out_name)
             Image.fromarray(new_mask).save(out_path)
             count += 1
             
-    print(f"✅ Đã convert thành công {count} mask của {dataset_name}.")
+    print(f"✅ Xong {name}: {count} ảnh.")
 
 # ================= MAIN =================
 if __name__ == "__main__":
-    # 1. ETRIMS
+    
+    # 1. Xử lý IRFS (QUAN TRỌNG NHẤT)
     process_dataset(
-        "ETRIMS",
-        os.path.join(config.ETRIMS_DIR, "annotations"),
-        os.path.join(config.ETRIMS_DIR, "masks"),
-        convert_etrims_mask
-    )
-
-    # 2. IRFS
-    # Input lấy từ folder Label (chứa ảnh mask gốc)
-    process_dataset(
-        "IRFS",
-        os.path.join(config.IRFS_DIR, "0-1-Label"), 
-        os.path.join(config.IRFS_DIR, "0-1-masks"),
+        "IRFS", 
+        os.path.join(config.IRFS_DIR, "0-1-Label"),
+        os.path.join(config.IRFS_DIR, "0-1-masks"), 
         convert_irfs_mask
     )
     
-    print("\n🎉 HOÀN TẤT TOÀN BỘ QUÁ TRÌNH CONVERT!")
+    print("\n🎉 ĐÃ CONVERT XONG TOÀN BỘ!")
