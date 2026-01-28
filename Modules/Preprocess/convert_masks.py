@@ -1,7 +1,7 @@
-import cv2
 import numpy as np
 import os
 import sys
+from PIL import Image
 
 # --- 1. SETUP ĐỂ IMPORT CONFIG ---
 # Lấy đường dẫn file hiện tại, đi lùi ra 2 cấp (Modules/Preprocess -> Root)
@@ -11,93 +11,155 @@ sys.path.append(root_dir)
 
 import config
 
-# ================= CẤU HÌNH MÀU SẮC (GIỮ NGUYÊN) =================
-CLASS_COLOR_GROUPS = {
-    0: [(0, 0, 0)], # Background
-    1: [(128, 0, 0)], # Building 
-    2: [(0, 0, 128)], # Window
-    3: [(128, 128, 0), (128, 64, 0)], # Door
-    4: [(0, 128, 0), (170, 255, 85)], # Tree
-    5: [
-        (0, 128, 128),
-        (0, 0, 255),
-        (0, 0, 170),
-        (0, 85, 255),
-        (0, 170, 255)
-    ], # Sky
-    6: [(128, 128, 128)], # Road
-    7: [(128, 0, 128)] # Car
-}
+# --- ĐÍCH ĐẾN: 8 CLASS CHUẨN CỦA PROJECT ---
+# 0: background
+# 1: building
+# 2: window
+# 3: door
+# 4: tree
+# 5: sky
+# 6: road
+# 7: car
 
-COLOR_MAP = {}
-for class_id, colors in CLASS_COLOR_GROUPS.items():
-    for c in colors:
-        COLOR_MAP[c] = class_id
+def convert_etrims_mask(mask_path):
+    """
+    ETRIMS: Ảnh index 8 bit.
+    Mapping dựa trên kết quả debug:
+    1->Build, 2->Car, 3->Door, 4->Road, 5->Road, 6->Sky, 7->Tree, 8->Window
+    """
+    try:
+        # Load ảnh chế độ 'L' (Grayscale/Index) để lấy đúng giá trị ID pixel
+        mask = Image.open(mask_path).convert('L')
+        mask_np = np.array(mask)
+    except Exception as e:
+        print(f"⚠️ Lỗi đọc file {os.path.basename(mask_path)}: {e}")
+        return None
 
+    h, w = mask_np.shape
+    new_mask = np.zeros((h, w), dtype=np.uint8) # Mặc định là 0 (Background)
 
-def rgb_mask_to_class_id(mask_rgb):
-    h, w, _ = mask_rgb.shape
-    class_mask = np.full((h, w), fill_value=255, dtype=np.uint8)  # 255 = invalid
-
-    for rgb, class_id in COLOR_MAP.items():
-        r, g, b = rgb
-        match = (
-            (mask_rgb[:, :, 0] == r) &
-            (mask_rgb[:, :, 1] == g) &
-            (mask_rgb[:, :, 2] == b)
-        )
-        class_mask[match] = class_id
-
-    return class_mask
-
-
-def find_unknown_colors(mask_rgb):
-    known = set(COLOR_MAP.keys())
-    colors = set(tuple(c) for c in mask_rgb.reshape(-1, 3))
-    return colors - known
-
-# ================= XỬ LÝ CHÍNH =================
-if __name__ == "__main__":
-    # SỬ DỤNG ĐƯỜNG DẪN TỪ CONFIG
-    # Dựa vào cấu trúc thư mục của bạn: annotations nằm trong etrims
-    input_dir  = os.path.join(config.ETRIMS_DIR, "annotations")
-    output_dir = os.path.join(config.ETRIMS_DIR, "masks")
+    # --- MAPPING ETRIMS -> FINAL ---
+    new_mask[mask_np == 1] = 1 # Building -> Building
+    new_mask[mask_np == 2] = 7 # Car -> Car
+    new_mask[mask_np == 3] = 3 # Door -> Door
+    new_mask[mask_np == 4] = 6 # Pavement -> Road
+    new_mask[mask_np == 5] = 6 # Road -> Road
+    new_mask[mask_np == 6] = 5 # Sky -> Sky
+    new_mask[mask_np == 7] = 4 # Vegetation -> Tree
+    new_mask[mask_np == 8] = 2 # Window -> Window
     
-    print(f"Input Dir:  {input_dir}")
-    print(f"Output Dir: {output_dir}")
+    return new_mask
 
-    if not os.path.exists(input_dir):
-        print(f"❌ Lỗi: Không tìm thấy thư mục input: {input_dir}")
-        exit()
+def convert_irfs_mask(mask_path):
+    """
+    IRFS: Ảnh index.
+    Lưu ý quan trọng: ID 0 của IRFS là Sky (Trời), khác với chuẩn chung!
+    """
+    try:
+        mask = Image.open(mask_path).convert('L')
+        mask_np = np.array(mask)
+    except:
+        return None
 
-    os.makedirs(output_dir, exist_ok=True)
+    h, w = mask_np.shape
+    new_mask = np.zeros((h, w), dtype=np.uint8)
 
+    # --- MAPPING IRFS -> FINAL ---
+    new_mask[mask_np == 0] = 5 # Sky -> Sky (Đã sửa lỗi quan trọng này)
+    new_mask[mask_np == 1] = 1 # Building -> Building
+    new_mask[mask_np == 2] = 2 # Window -> Window
+    new_mask[mask_np == 3] = 1 # Các chi tiết phụ -> Building
+    new_mask[mask_np == 4] = 3 # Door -> Door
+    new_mask[mask_np == 5] = 4 # Tree -> Tree
+
+    return new_mask
+
+def convert_cmp_mask(mask_path):
+    """
+    CMP: Thường là ảnh index hoặc RGB chuẩn.
+    Ta dùng mapping chuẩn của CMP Facade Database.
+    """
+    try:
+        mask = Image.open(mask_path).convert('L')
+        mask_np = np.array(mask)
+    except:
+        return None
+        
+    h, w = mask_np.shape
+    new_mask = np.zeros((h, w), dtype=np.uint8)
+    
+    # --- MAPPING CMP -> FINAL ---
+    # 1-4: Các loại tường/cột -> Building
+    new_mask[mask_np == 1] = 1 
+    new_mask[mask_np == 2] = 1
+    new_mask[mask_np == 3] = 1
+    new_mask[mask_np == 4] = 1
+    
+    # 5, 7, 8: Các loại cửa sổ/rèm -> Window
+    new_mask[mask_np == 5] = 2
+    new_mask[mask_np == 7] = 2
+    new_mask[mask_np == 8] = 2
+    
+    # 6, 10: Cửa đi, Cửa hàng -> Door
+    new_mask[mask_np == 6] = 3
+    new_mask[mask_np == 10] = 3
+    
+    # 9, 11: Ban công, trang trí -> Building
+    new_mask[mask_np == 9] = 1
+    new_mask[mask_np == 11] = 1
+    
+    # 12: Sky -> Sky
+    new_mask[mask_np == 12] = 5
+    
+    return new_mask
+
+def process_dataset(dataset_name, input_folder, output_folder, convert_func):
+    print(f"\n🚀 Đang xử lý bộ: {dataset_name}...")
+    print(f"   Input:  {input_folder}")
+    print(f"   Output: {output_folder}")
+
+    if not os.path.exists(input_folder):
+        print(f"❌ LỖI: Không tìm thấy thư mục input: {input_folder}")
+        return
+
+    os.makedirs(output_folder, exist_ok=True)
+    files = [f for f in os.listdir(input_folder) if f.endswith(('.png', '.jpg', '.jpeg'))]
+    
     count = 0
-    for fname in os.listdir(input_dir):
-        if not fname.lower().endswith((".png", ".jpg")):
-            continue
-
-        bgr = cv2.imread(os.path.join(input_dir, fname))
-        if bgr is None:
-            print(f"⚠️ Không đọc được ảnh: {fname}")
-            continue
+    for f in files:
+        in_path = os.path.join(input_folder, f)
+        
+        # Thực hiện convert
+        new_mask = convert_func(in_path)
+        
+        if new_mask is not None:
+            # Lưu file kết quả dưới dạng PNG (quan trọng để giữ đúng giá trị pixel)
+            # Giữ nguyên tên file gốc, chỉ đảm bảo đuôi là .png
+            out_name = os.path.splitext(f)[0] + ".png"
+            out_path = os.path.join(output_folder, out_name)
             
-        rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
+            Image.fromarray(new_mask).save(out_path)
+            count += 1
+            
+    print(f"✅ Đã convert thành công {count} mask của {dataset_name}.")
 
-        unknown = find_unknown_colors(rgb)
-        if len(unknown) > 0:
-            print(f"[ERROR] {fname} still has unknown colors: {unknown}")
-            continue  # KHÔNG convert nếu còn màu lạ
+# ================= MAIN =================
+if __name__ == "__main__":
+    # 1. ETRIMS
+    process_dataset(
+        "ETRIMS",
+        os.path.join(config.ETRIMS_DIR, "annotations"),
+        os.path.join(config.ETRIMS_DIR, "masks"),
+        convert_etrims_mask
+    )
 
-        class_mask = rgb_mask_to_class_id(rgb)
-
-        # Check an toàn lần cuối
-        if 255 in np.unique(class_mask):
-            print(f"Invalid pixel in {fname}")
-            continue
-
-        cv2.imwrite(os.path.join(output_dir, fname), class_mask)
-        count += 1
-        print(f"Converted OK: {fname}")
-
-    print(f"\n✅ Đã convert xong {count} ảnh mask.")
+    # 2. IRFS
+    # Input lấy từ folder Label (chứa ảnh mask gốc)
+    process_dataset(
+        "IRFS",
+        os.path.join(config.IRFS_DIR, "0-1-Label"), 
+        os.path.join(config.IRFS_DIR, "0-1-masks"),
+        convert_irfs_mask
+    )
+    
+    print("\n🎉 HOÀN TẤT TOÀN BỘ QUÁ TRÌNH CONVERT!")

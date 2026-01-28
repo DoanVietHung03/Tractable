@@ -2,6 +2,7 @@ import os
 import sys
 import numpy as np
 import torch
+import random
 from torch.utils.data import Dataset
 from PIL import Image
 from transformers import (
@@ -56,9 +57,10 @@ MODEL_CHECKPOINT = "nvidia/mit-b1"
 
 # --- 4. DATASET CLASS ---
 class SemanticSegmentationDataset(Dataset):
-    def __init__(self, root_dir, processor):
+    def __init__(self, root_dir, processor, augment=False):
         self.root_dir = root_dir
         self.processor = processor
+        self.augment = augment
         self.images_dir = os.path.join(root_dir, "images")
         self.masks_dir = os.path.join(root_dir, "masks")
         
@@ -81,6 +83,20 @@ class SemanticSegmentationDataset(Dataset):
             mask_name = mask_stem + ".png"
             
         segmentation_map = Image.open(os.path.join(self.masks_dir, mask_name))
+        
+        if self.augment:
+            # 1. Random Horizontal Flip (Lật ngang 50%)
+            if random.random() > 0.5:
+                image = image.transpose(Image.FLIP_LEFT_RIGHT)
+                segmentation_map = segmentation_map.transpose(Image.FLIP_LEFT_RIGHT)
+            
+            # 2. Color Jitter (Thay đổi độ sáng/tương phản nhẹ - Chỉ ảnh, không sửa mask)
+            # Chỉnh độ sáng (0.8 - 1.2)
+            enhancer = ImageEnhance.Brightness(image)
+            image = enhancer.enhance(random.uniform(0.8, 1.2))
+            # Chỉnh tương phản (0.8 - 1.2)
+            enhancer = ImageEnhance.Contrast(image)
+            image = enhancer.enhance(random.uniform(0.8, 1.2))
 
         inputs = self.processor(
             images=image, 
@@ -97,8 +113,8 @@ processor = SegformerImageProcessor.from_pretrained(
     do_reduce_labels=False
 )
 
-train_dataset = SemanticSegmentationDataset(TRAIN_DIR, processor)
-val_dataset = SemanticSegmentationDataset(VAL_DIR, processor)
+train_dataset = SemanticSegmentationDataset(TRAIN_DIR, processor, augment=True)
+val_dataset = SemanticSegmentationDataset(VAL_DIR, processor, augment=False)
 
 # Kiểm tra nhanh
 print(f"Train size: {len(train_dataset)}, Val size: {len(val_dataset)}")
@@ -135,20 +151,26 @@ def compute_metrics(eval_pred):
         reduce_labels=False
     )
     
-    return {
+    # Trả về chi tiết từng class để dễ theo dõi
+    per_category_iou = metrics.pop("per_category_iou")
+    results = {
         "mean_iou": metrics["mean_iou"],
-        "mean_accuracy": metrics["mean_accuracy"],
-        "overall_accuracy": metrics["overall_accuracy"],
-        # An toàn hơn: dùng get() để tránh lỗi index nếu dataset thiếu class
-        "iou_building": metrics["per_category_iou"][1] if len(metrics["per_category_iou"]) > 1 else 0.0
+        "accuracy": metrics["overall_accuracy"],
     }
+    # Log thêm IoU của vài class quan trọng
+    if len(per_category_iou) > 4: # Đảm bảo đủ class
+        results["iou_building"] = per_category_iou[1]
+        results["iou_window"] = per_category_iou[2]
+        results["iou_tree"] = per_category_iou[4]
+        
+    return results
 
 # --- 8. TRAINING ARGUMENTS ---
 training_args = TrainingArguments(
     output_dir=OUTPUT_CHECKPOINT_DIR, # Dùng đường dẫn từ config
     
     learning_rate=6e-5,          
-    num_train_epochs=100,        
+    num_train_epochs=50,        
     lr_scheduler_type="cosine",  # <--- Thay đổi: Giảm LR theo hình sin (tốt hơn linear mặc định)
     warmup_ratio=0.1,            # <--- 10% thời gian đầu để "làm nóng" model, tránh shock
     
@@ -164,7 +186,7 @@ training_args = TrainingArguments(
     save_total_limit=2,  # Chỉ giữ lại 2 checkpoint gần nhất
     eval_strategy="epoch",
     save_strategy="epoch",
-    logging_steps=1,
+    logging_steps=10,
     remove_unused_columns=False,
     push_to_hub=False,
     
@@ -172,7 +194,7 @@ training_args = TrainingArguments(
     metric_for_best_model="mean_iou", # Tiêu chí: Cái nào có Mean IoU cao nhất là NHẤT
     greater_is_better=True,
     
-    fp16=torch.cuda.is_available(),  # Dùng FP16 nếu có GPU
+    fp16=False,  # Dùng FP16 nếu có GPU
 )
 
 # --- 9. BẮT ĐẦU TRAIN ---

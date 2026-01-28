@@ -7,7 +7,7 @@ __pycache__/
 .vscode/
 *.log
 Weights/
-output/
+Output/
 Samples/
 Architecture/
 Dataset/
