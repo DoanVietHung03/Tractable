@@ -23,77 +23,90 @@ import config
 
 def convert_irfs_mask(mask_path):
     """
-    Mapping chuẩn xác dựa trên ảnh check_mask_id (IRFS.jpg):
-    - ID 0: Building (Tường, bê tông) -> Map về 1
-    - ID 1: Sky (Bầu trời) -> Map về 5
-    - ID 2: Window (Kính) -> Map về 2
-    - ID 4: Door (Lối vào) -> Map về 3
-    - ID 5: Tree (Cây) -> Map về 4
+    Mapping dựa trên bảng màu RGB của IRFS (image_e4d576.png):
+    - Facade (128, 0, 0) -> Building
+    - Window (0, 128, 0) -> Window
+    - Door (128, 128, 0) -> Door
+    - Roof (0, 0, 128)   -> Building
+    - Balcony (128, 0, 128) -> Building
+    - Shop (0, 128, 128) -> Door (Vì shop thường là cửa kính lớn)
+    - Chimney (128, 128, 128) -> Building
     """
     try:
-        mask = Image.open(mask_path).convert('L')
+        # QUAN TRỌNG: Phải convert sang RGB để so sánh màu
+        mask = Image.open(mask_path).convert('RGB')
         mask_np = np.array(mask)
     except Exception as e:
         print(f"Lỗi đọc file {mask_path}: {e}")
         return None
 
-    h, w = mask_np.shape
+    h, w, _ = mask_np.shape
     new_mask = np.zeros((h, w), dtype=np.uint8)
 
-    # --- MAPPING IRFS -> FINAL ---
-    new_mask[mask_np == 0] = 1  # ID 0 là Tường -> Building
-    new_mask[mask_np == 1] = 5  # ID 1 là Trời -> Sky
-    new_mask[mask_np == 2] = 2  # ID 2 là Kính -> Window
-    new_mask[mask_np == 4] = 3  # ID 4 là Cửa -> Door
-    new_mask[mask_np == 5] = 4  # ID 5 là Cây -> Tree
+    # --- MAPPING MÀU RGB -> ID ---
     
-    # Các ID lạ khác (nếu có) sẽ mặc định là 0 (Background)
+    # 1. Facade -> Building (1)
+    # Tìm các pixel có màu (128, 0, 0)
+    new_mask[(mask_np == (128, 0, 0)).all(axis=2)] = 1
+    
+    # 2. Window -> Window (2)
+    new_mask[(mask_np == (0, 128, 0)).all(axis=2)] = 2
+    
+    # 3. Door -> Door (3)
+    new_mask[(mask_np == (128, 128, 0)).all(axis=2)] = 3
+    
+    # 4. Roof -> Building (1)
+    new_mask[(mask_np == (0, 0, 128)).all(axis=2)] = 1
+    
+    # 5. Balcony -> Building (1)
+    new_mask[(mask_np == (128, 0, 128)).all(axis=2)] = 1
+    
+    # 6. Shop -> Door (3)
+    new_mask[(mask_np == (0, 128, 128)).all(axis=2)] = 3
+    
+    # 7. Chimney -> Building (1)
+    new_mask[(mask_np == (128, 128, 128)).all(axis=2)] = 1
+
+    # Các màu còn lại (bao gồm (0,0,0) Background) mặc định là 0
     
     return new_mask
 
+# --- Các hàm khác giữ nguyên ---
 def convert_etrims_mask(mask_path):
-    """ETRIMS Mapping (Giữ nguyên vì đã chuẩn)"""
     try:
         mask = Image.open(mask_path).convert('L')
         mask_np = np.array(mask)
     except: return None
-
     h, w = mask_np.shape
     new_mask = np.zeros((h, w), dtype=np.uint8)
-
     new_mask[mask_np == 1] = 1 # Building
     new_mask[mask_np == 2] = 7 # Car
     new_mask[mask_np == 3] = 3 # Door
-    new_mask[mask_np == 4] = 6 # Pavement -> Road
-    new_mask[mask_np == 5] = 6 # Road -> Road
+    new_mask[mask_np == 4] = 6 # Road
+    new_mask[mask_np == 5] = 6 # Road
     new_mask[mask_np == 6] = 5 # Sky
-    new_mask[mask_np == 7] = 4 # Vegetation -> Tree
+    new_mask[mask_np == 7] = 4 # Tree
     new_mask[mask_np == 8] = 2 # Window
-    
     return new_mask
 
 def convert_cmp_mask(mask_path):
-    """CMP Mapping (Giữ nguyên)"""
     try:
         mask = Image.open(mask_path).convert('L')
         mask_np = np.array(mask)
     except: return None
-        
     h, w = mask_np.shape
     new_mask = np.zeros((h, w), dtype=np.uint8)
-    
-    new_mask[mask_np == 1] = 1 # Wall -> Building
+    new_mask[mask_np == 1] = 1 
     new_mask[mask_np == 2] = 1
     new_mask[mask_np == 3] = 1
     new_mask[mask_np == 4] = 1
-    new_mask[mask_np == 5] = 2 # Window
-    new_mask[mask_np == 6] = 3 # Door
+    new_mask[mask_np == 5] = 2 
+    new_mask[mask_np == 6] = 3 
     new_mask[mask_np == 7] = 2 
     new_mask[mask_np == 8] = 2 
     new_mask[mask_np == 9] = 1 
     new_mask[mask_np == 10] = 3 
-    new_mask[mask_np == 12] = 5 # Sky
-    
+    new_mask[mask_np == 12] = 5 
     return new_mask
 
 def process_dataset(name, input_dir, output_dir, func):
@@ -120,10 +133,8 @@ def process_dataset(name, input_dir, output_dir, func):
             
     print(f"✅ Xong {name}: {count} ảnh.")
 
-# ================= MAIN =================
 if __name__ == "__main__":
-    
-    # 1. Xử lý IRFS (QUAN TRỌNG NHẤT)
+    # 1. IRFS
     process_dataset(
         "IRFS", 
         os.path.join(config.IRFS_DIR, "0-1-Label"),
